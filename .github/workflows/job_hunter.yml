@@ -1,0 +1,35 @@
+name: 🤖 AI 부업 일자리 헌터
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  hunt-jobs:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 코드 가져오기
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: 📦 패키지 설치
+        run: pip install requests
+      
+      - name: 🔍 일자리 검색
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python job_hunter.py
+      
+      - name: 💾 상태 저장
+        uses: actions/cache@v4
+        with:
+          path: seen_jobs.json
+          key: seen-jobs-${{ github.run_id }}
+          restore-keys: seen-jobs-
