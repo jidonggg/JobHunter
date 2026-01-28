@@ -1,8 +1,11 @@
 name: 🤖 AI 부업 일자리 헌터
 
 on:
+  # 1시간마다 실행
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 * * * *'  # 매시 정각
+  
+  # 수동 실행 가능
   workflow_dispatch:
 
 jobs:
@@ -19,17 +22,20 @@ jobs:
           python-version: '3.11'
       
       - name: 📦 패키지 설치
-        run: pip install requests
+        run: |
+          pip install requests
       
-      - name: 🔍 일자리 검색
+      - name: 🔍 일자리 검색 실행
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python job_hunter.py
+        run: |
+          python job_hunter.py --once
       
-      - name: 💾 상태 저장
+      - name: 💾 본 일자리 목록 저장
         uses: actions/cache@v4
         with:
           path: seen_jobs.json
           key: seen-jobs-${{ github.run_id }}
-          restore-keys: seen-jobs-
+          restore-keys: |
+            seen-jobs-
