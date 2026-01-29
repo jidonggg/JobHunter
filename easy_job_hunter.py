@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-🎯 초보자용 AI 부업 일자리 헌터 v5.0
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- 쉬운 공고만 필터링 (난이도 1-2)
-- Claude에게 시킬 프롬프트 포함
-- 예상 결과물 형태 안내
-- 예상 수익/작업시간 포함
-- 4시간마다 자동 실행
+🧠 스마트 일자리 헌터 v6.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- 키워드 1차 필터링
+- Claude API로 공고 상세 분석
+- 진짜 쉬운 것만 필터링
+- 해결 방법 + 코드/JSON까지 생성
+- 텔레그램 전송
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import requests
@@ -23,217 +24,26 @@ import xml.etree.ElementTree as ET
 # ============ 설정 ============
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '8147625350:AAH_S8Ma8qLCUTZ44NPSzRsQk_yh10UJ2A0')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '2136958929')
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 
-# 쉬운 작업 키워드 (이것만 검색)
-EASY_KEYWORDS = [
+# 검색 키워드
+SEARCH_KEYWORDS = [
     "n8n workflow",
-    "zapier automation",
+    "zapier automation", 
+    "make automation",
     "manychat",
-    "simple chatbot",
-    "csv script",
-    "google sheets automation",
-    "slack notification",
-    "email automation simple",
+    "chatbot simple",
+    "google sheets script",
+    "slack bot",
+    "telegram bot",
+    "email automation",
     "chatgpt prompt",
-    "data cleaning script",
+    "csv python",
+    "data cleaning",
+    "web scraping simple",
 ]
 
-SEEN_JOBS_FILE = Path("seen_jobs_v5.json")
-
-# ============ 작업 유형 템플릿 ============
-JOB_TEMPLATES = {
-    "n8n_webhook_slack": {
-        "keywords": ["n8n", "webhook", "slack", "notification", "form"],
-        "name": "n8n 웹훅→슬랙 알림",
-        "difficulty": 1,
-        "price_range": "$50-100",
-        "time": "30분",
-        "what_client_wants": "폼 제출되면 슬랙에 알림 보내기",
-        "prompt": """n8n 워크플로우 JSON 만들어줘.
-
-기능:
-1. 웹훅으로 폼 데이터 받기
-2. 슬랙 채널에 메시지 보내기:
-   "📬 새 폼 제출!
-   이름: {{name}}
-   이메일: {{email}}
-   내용: {{message}}"
-
-바로 import 가능한 JSON으로 줘.""",
-        "output_type": "n8n JSON 파일",
-        "delivery_msg": "n8n에서 Import → Credentials 연결 → 활성화"
-    },
-    
-    "n8n_email_sheet": {
-        "keywords": ["n8n", "email", "sheet", "google sheet", "gmail"],
-        "name": "n8n 이메일→구글시트",
-        "difficulty": 1,
-        "price_range": "$75-150",
-        "time": "30분",
-        "what_client_wants": "특정 이메일 오면 구글시트에 자동 저장",
-        "prompt": """n8n 워크플로우 JSON 만들어줘.
-
-기능:
-1. Gmail에서 새 이메일 감지
-2. 발신자, 제목, 본문 추출
-3. 구글시트에 새 행으로 추가
-
-JSON으로 줘.""",
-        "output_type": "n8n JSON 파일",
-        "delivery_msg": "n8n Import → Gmail/Sheets 연결 → 활성화"
-    },
-    
-    "n8n_ai_classify": {
-        "keywords": ["n8n", "ai", "classify", "chatgpt", "categorize", "label"],
-        "name": "n8n AI 분류 자동화",
-        "difficulty": 2,
-        "price_range": "$100-200",
-        "time": "1시간",
-        "what_client_wants": "AI로 이메일/데이터 자동 분류",
-        "prompt": """n8n 워크플로우 JSON 만들어줘.
-
-기능:
-1. 데이터 입력 받기
-2. OpenAI API로 분류 (카테고리 목록 제공)
-3. 분류 결과에 따라 다른 액션
-
-JSON으로 줘.""",
-        "output_type": "n8n JSON 파일 (OpenAI 노드 포함)",
-        "delivery_msg": "n8n Import → OpenAI API 키 연결 → 테스트"
-    },
-    
-    "zapier_simple": {
-        "keywords": ["zapier", "zap", "connect", "integration", "simple"],
-        "name": "Zapier 연동 설정",
-        "difficulty": 1,
-        "price_range": "$30-75",
-        "time": "30분",
-        "what_client_wants": "두 앱 연결해서 자동화",
-        "prompt": """Zapier 연동 가이드 만들어줘.
-
-연동: [앱A] → [앱B]
-트리거: [이벤트]
-액션: [수행할 작업]
-
-단계별 스크린샷 설명 포함해서 마크다운으로 줘.""",
-        "output_type": "단계별 가이드 문서 (마크다운)",
-        "delivery_msg": "PDF 또는 Notion 링크로 전달"
-    },
-    
-    "manychat_flow": {
-        "keywords": ["manychat", "instagram", "dm", "auto reply", "messenger"],
-        "name": "ManyChat 자동응답",
-        "difficulty": 1,
-        "price_range": "$50-100",
-        "time": "1시간",
-        "what_client_wants": "인스타/메신저 DM 자동응답",
-        "prompt": """ManyChat 자동응답 플로우 설계해줘.
-
-키워드별 응답:
-1. "price" → 가격 안내
-2. "hours" → 영업시간
-3. "book" → 예약 링크
-
-각 키워드별 트리거 설정 방법 + 응답 메시지 텍스트 포함.
-마크다운으로 줘.""",
-        "output_type": "플로우 설계 문서 + 메시지 템플릿",
-        "delivery_msg": "ManyChat에서 직접 설정하는 가이드 포함"
-    },
-    
-    "csv_script": {
-        "keywords": ["csv", "clean", "script", "python", "data", "excel", "duplicate"],
-        "name": "CSV/데이터 정리 스크립트",
-        "difficulty": 1,
-        "price_range": "$30-75",
-        "time": "30분",
-        "what_client_wants": "지저분한 데이터 파일 정리",
-        "prompt": """Python 스크립트 만들어줘.
-
-기능:
-1. CSV 파일 읽기
-2. 중복 행 제거
-3. 데이터 정리 (빈 값, 포맷 등)
-4. 정리된 CSV/Excel 저장
-
-사용법 설명 포함해서 줘.""",
-        "output_type": "Python 스크립트 (.py)",
-        "delivery_msg": "스크립트 파일 + 사용법 README"
-    },
-    
-    "scraper_simple": {
-        "keywords": ["scrape", "scraping", "extract", "website", "data"],
-        "name": "웹 스크래핑 스크립트",
-        "difficulty": 2,
-        "price_range": "$50-150",
-        "time": "1시간",
-        "what_client_wants": "웹사이트에서 데이터 추출",
-        "prompt": """Python 웹 스크래핑 스크립트 만들어줘.
-
-타겟: [URL]
-추출할 데이터: [항목들]
-저장 형식: CSV/Excel
-
-requests, beautifulsoup4 사용.
-사용법 포함해서 줘.""",
-        "output_type": "Python 스크립트 (.py)",
-        "delivery_msg": "스크립트 + 실행 방법 + 샘플 출력"
-    },
-    
-    "chatgpt_prompt": {
-        "keywords": ["chatgpt", "prompt", "gpt", "ai prompt", "prompt engineering"],
-        "name": "ChatGPT 프롬프트 작성",
-        "difficulty": 1,
-        "price_range": "$25-75",
-        "time": "1시간",
-        "what_client_wants": "특정 용도의 AI 프롬프트",
-        "prompt": """[용도]용 ChatGPT 프롬프트 만들어줘.
-
-포함할 것:
-- 시스템 프롬프트
-- 예시 입출력
-- 톤/스타일 가이드
-- 변형 버전 3개
-
-마크다운으로 정리해줘.""",
-        "output_type": "프롬프트 모음 문서",
-        "delivery_msg": "마크다운/PDF로 전달"
-    },
-    
-    "sheets_automation": {
-        "keywords": ["google sheet", "spreadsheet", "formula", "automation", "apps script"],
-        "name": "구글시트 자동화",
-        "difficulty": 1,
-        "price_range": "$30-100",
-        "time": "30분-1시간",
-        "what_client_wants": "스프레드시트 자동 계산/정리",
-        "prompt": """구글시트 자동화 만들어줘.
-
-기능: [원하는 기능]
-
-Apps Script 코드 + 설정 방법 포함해서 줘.""",
-        "output_type": "Apps Script 코드 + 설정 가이드",
-        "delivery_msg": "코드 + 시트에 적용하는 방법"
-    },
-    
-    "simple_bot": {
-        "keywords": ["simple bot", "basic chatbot", "faq bot", "auto reply"],
-        "name": "간단한 FAQ 봇",
-        "difficulty": 2,
-        "price_range": "$75-150",
-        "time": "1-2시간",
-        "what_client_wants": "자주 묻는 질문 자동응답",
-        "prompt": """FAQ 챗봇 로직 만들어줘.
-
-질문-답변 쌍:
-1. [질문1] → [답변1]
-2. [질문2] → [답변2]
-...
-
-키워드 매칭 방식으로 Python 코드 또는 n8n JSON으로 줘.""",
-        "output_type": "Python 코드 또는 n8n JSON",
-        "delivery_msg": "코드/JSON + 커스터마이징 방법"
-    }
-}
+SEEN_JOBS_FILE = Path("seen_jobs_v6.json")
 
 # ============ 유틸리티 ============
 
@@ -248,13 +58,13 @@ def load_seen_jobs():
 
 def save_seen_jobs(seen):
     with open(SEEN_JOBS_FILE, 'w') as f:
-        json.dump(seen[-500:], f)
+        json.dump(seen[-1000:], f)
 
 def job_id(title, link):
     return hashlib.md5(f"{title}{link}".encode()).hexdigest()
 
 def send_telegram(message):
-    """텔레그램 메시지 전송 (4096자 제한 처리)"""
+    """텔레그램 메시지 전송"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ 텔레그램 설정 없음")
         return False
@@ -263,7 +73,7 @@ def send_telegram(message):
     
     # 4096자 제한
     if len(message) > 4000:
-        message = message[:3900] + "\n\n... (메시지가 잘렸습니다)"
+        message = message[:3900] + "\n\n... (더 보기: 링크 클릭)"
     
     try:
         r = requests.post(url, json={
@@ -277,58 +87,6 @@ def send_telegram(message):
         print(f"❌ 텔레그램 오류: {e}")
         return False
 
-def match_template(title, description):
-    """공고에 맞는 템플릿 찾기"""
-    text = (title + " " + description).lower()
-    
-    best_match = None
-    best_score = 0
-    
-    for key, template in JOB_TEMPLATES.items():
-        score = sum(1 for kw in template["keywords"] if kw in text)
-        if score > best_score:
-            best_score = score
-            best_match = key
-    
-    if best_score >= 2:
-        return JOB_TEMPLATES[best_match]
-    elif best_score >= 1:
-        return JOB_TEMPLATES.get(best_match)
-    
-    return None
-
-def is_easy_job(title, description):
-    """쉬운 작업인지 판단"""
-    text = (title + " " + description).lower()
-    
-    # 어려운 키워드 (제외)
-    hard_keywords = [
-        "complex", "enterprise", "machine learning", "custom api",
-        "voice ai", "real-time", "scalable", "multi-tenant",
-        "blockchain", "crypto", "trading bot", "mobile app",
-        "full stack", "backend developer", "senior"
-    ]
-    
-    if any(kw in text for kw in hard_keywords):
-        return False
-    
-    # 쉬운 키워드 (포함)
-    easy_keywords = [
-        "simple", "basic", "quick", "small", "easy",
-        "straightforward", "beginner", "setup", "configure"
-    ]
-    
-    # 템플릿 매칭되면 쉬움
-    template = match_template(title, description)
-    if template and template.get("difficulty", 5) <= 2:
-        return True
-    
-    # 쉬운 키워드 있으면 쉬움
-    if any(kw in text for kw in easy_keywords):
-        return True
-    
-    return False
-
 def extract_budget(text):
     """예산 추출"""
     patterns = [
@@ -338,7 +96,7 @@ def extract_budget(text):
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
             if len(match.groups()) == 2:
                 return f"${match.group(1)}-${match.group(2)}"
@@ -346,10 +104,116 @@ def extract_budget(text):
     
     return "미정"
 
+# ============ Claude API 분석 ============
+
+def analyze_job_with_claude(job):
+    """Claude API로 공고 분석 및 솔루션 생성"""
+    
+    if not ANTHROPIC_API_KEY:
+        print("⚠️ ANTHROPIC_API_KEY 없음")
+        return None
+    
+    prompt = f"""당신은 프리랜서 일자리 분석가입니다.
+
+아래 공고를 분석해서 JSON으로 답변해주세요.
+
+## 공고 정보
+- 플랫폼: {job['platform']}
+- 제목: {job['title']}
+- 설명: {job['description']}
+- 예산: {job['budget']}
+
+## 분석 기준
+
+### 쉬운 작업 (is_easy: true)
+- n8n/Zapier/Make 워크플로우 (단순 연동)
+- ManyChat/Chatbot 플로우 설정
+- Google Sheets 스크립트
+- 간단한 Python 스크립트 (CSV 정리, 데이터 처리)
+- ChatGPT 프롬프트 작성
+- 단순 웹 스크래핑
+- Slack/Telegram 봇 (단순 알림)
+- API 연동 (1-2개 서비스)
+
+### 어려운 작업 (is_easy: false)
+- 복잡한 백엔드 개발
+- 모바일 앱 개발
+- ML/AI 모델 학습
+- 실시간 시스템
+- 복잡한 인증/보안
+- 대규모 데이터 처리
+- 여러 시스템 통합
+- 유지보수/지속 작업
+
+## 응답 형식 (JSON만 출력)
+
+쉬운 작업인 경우:
+```json
+{{
+  "is_easy": true,
+  "confidence": 0.9,
+  "category": "n8n workflow",
+  "summary_ko": "구글폼 제출시 슬랙 알림 보내기",
+  "requirements": [
+    "웹훅으로 폼 데이터 받기",
+    "슬랙 채널에 메시지 전송"
+  ],
+  "estimated_time": "30분-1시간",
+  "estimated_price": "$50-100",
+  "difficulty": 1,
+  "solution_type": "n8n_json",
+  "solution_description": "n8n 워크플로우 JSON 파일",
+  "claude_prompt": "n8n 워크플로우 JSON 만들어줘.\\n\\n기능:\\n1. 웹훅 트리거\\n2. 슬랙 메시지 전송\\n\\nJSON으로 줘.",
+  "delivery_guide": "1. n8n에서 Import\\n2. Credentials 연결\\n3. 활성화"
+}}
+```
+
+어려운 작업인 경우:
+```json
+{{
+  "is_easy": false,
+  "confidence": 0.8,
+  "reason": "복잡한 실시간 데이터 처리와 ML 모델 필요"
+}}
+```
+
+JSON만 출력하세요. 다른 텍스트 없이."""
+
+    try:
+        r = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            },
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 1500,
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            timeout=60
+        )
+        
+        if r.status_code == 200:
+            content = r.json()['content'][0]['text']
+            
+            # JSON 추출
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                return json.loads(json_match.group())
+        else:
+            print(f"❌ Claude API 오류: {r.status_code} - {r.text[:200]}")
+            
+    except Exception as e:
+        print(f"❌ Claude 분석 오류: {e}")
+    
+    return None
+
 # ============ 플랫폼별 수집 ============
 
 def fetch_upwork(keyword):
-    """Upwork RSS에서 공고 수집"""
+    """Upwork RSS"""
     url = f"https://www.upwork.com/ab/feed/jobs/rss?q={quote(keyword)}&sort=recency"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     
@@ -358,7 +222,7 @@ def fetch_upwork(keyword):
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code == 200:
             root = ET.fromstring(r.content)
-            for item in root.findall('.//item')[:10]:  # 최신 10개만
+            for item in root.findall('.//item')[:8]:
                 title_elem = item.find('title')
                 link_elem = item.find('link')
                 desc_elem = item.find('description')
@@ -367,17 +231,14 @@ def fetch_upwork(keyword):
                     title = title_elem.text or ""
                     link = link_elem.text or ""
                     desc = desc_elem.text if desc_elem is not None else ""
-                    
-                    # HTML 태그 제거
                     desc = re.sub(r'<[^>]+>', '', desc)
                     
                     jobs.append({
                         'platform': 'Upwork',
                         'title': title,
                         'link': link,
-                        'description': desc[:500],
-                        'budget': extract_budget(desc),
-                        'keyword': keyword
+                        'description': desc[:1000],
+                        'budget': extract_budget(desc)
                     })
     except Exception as e:
         print(f"  ❌ Upwork 오류: {e}")
@@ -385,13 +246,9 @@ def fetch_upwork(keyword):
     return jobs
 
 def fetch_freelancer(keyword):
-    """Freelancer API에서 공고 수집"""
+    """Freelancer API"""
     url = "https://www.freelancer.com/api/projects/0.1/projects/active/"
-    params = {
-        'query': keyword,
-        'limit': 10,
-        'sort_field': 'time_submitted',
-    }
+    params = {'query': keyword, 'limit': 8, 'sort_field': 'time_submitted'}
     
     jobs = []
     try:
@@ -407,9 +264,8 @@ def fetch_freelancer(keyword):
                     'platform': 'Freelancer',
                     'title': project.get('title', ''),
                     'link': f"https://www.freelancer.com/projects/{project.get('seo_url', '')}",
-                    'description': project.get('preview_description', '')[:500],
-                    'budget': budget,
-                    'keyword': keyword
+                    'description': project.get('preview_description', '')[:1000],
+                    'budget': budget
                 })
     except Exception as e:
         print(f"  ❌ Freelancer 오류: {e}")
@@ -417,16 +273,16 @@ def fetch_freelancer(keyword):
     return jobs
 
 def fetch_peopleperhour(keyword):
-    """PeoplePerHour RSS에서 공고 수집"""
+    """PeoplePerHour RSS"""
     url = f"https://www.peopleperhour.com/freelance-jobs/rss?q={quote(keyword)}"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     jobs = []
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code == 200:
             root = ET.fromstring(r.content)
-            for item in root.findall('.//item')[:10]:
+            for item in root.findall('.//item')[:8]:
                 title_elem = item.find('title')
                 link_elem = item.find('link')
                 desc_elem = item.find('description')
@@ -441,9 +297,8 @@ def fetch_peopleperhour(keyword):
                         'platform': 'PeoplePerHour',
                         'title': title,
                         'link': link,
-                        'description': desc[:500],
-                        'budget': extract_budget(desc),
-                        'keyword': keyword
+                        'description': desc[:1000],
+                        'budget': extract_budget(desc)
                     })
     except Exception as e:
         print(f"  ❌ PeoplePerHour 오류: {e}")
@@ -451,9 +306,9 @@ def fetch_peopleperhour(keyword):
     return jobs
 
 def fetch_remoteok(keyword):
-    """RemoteOK API에서 공고 수집"""
+    """RemoteOK API"""
     url = "https://remoteok.com/api"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     jobs = []
     try:
@@ -462,78 +317,69 @@ def fetch_remoteok(keyword):
             data = r.json()
             keyword_lower = keyword.lower()
             
-            for job in data[1:20]:  # 첫번째는 메타데이터
+            for job in data[1:30]:
                 title = job.get('position', '')
                 desc = job.get('description', '')
                 tags = ' '.join(job.get('tags', []))
                 
-                # 키워드 매칭
                 if keyword_lower in title.lower() or keyword_lower in desc.lower() or keyword_lower in tags.lower():
                     salary = job.get('salary_min', '')
-                    if salary:
-                        budget = f"${salary}+"
-                    else:
-                        budget = "미정"
+                    budget = f"${salary}+" if salary else "미정"
                     
                     jobs.append({
                         'platform': 'RemoteOK',
                         'title': title,
                         'link': job.get('url', ''),
-                        'description': re.sub(r'<[^>]+>', '', desc)[:500],
-                        'budget': budget,
-                        'keyword': keyword
+                        'description': re.sub(r'<[^>]+>', '', desc)[:1000],
+                        'budget': budget
                     })
+                    
+                    if len(jobs) >= 8:
+                        break
     except Exception as e:
         print(f"  ❌ RemoteOK 오류: {e}")
     
-    return jobs[:10]
+    return jobs
 
 def fetch_kmong(keyword):
-    """크몽에서 공고 수집 (웹 스크래핑)"""
-    
-    # 키워드 한글 변환
+    """크몽 검색"""
     keyword_map = {
-        "n8n workflow": "n8n",
+        "n8n workflow": "n8n 자동화",
         "zapier automation": "자동화",
+        "make automation": "자동화",
         "manychat": "챗봇",
-        "simple chatbot": "챗봇",
-        "csv script": "엑셀 자동화",
-        "google sheets automation": "구글시트",
-        "slack notification": "슬랙",
-        "email automation simple": "이메일 자동화",
+        "chatbot simple": "챗봇",
+        "google sheets script": "구글시트",
+        "slack bot": "슬랙",
+        "telegram bot": "텔레그램 봇",
+        "email automation": "이메일 자동화",
         "chatgpt prompt": "ChatGPT",
-        "data cleaning script": "데이터 정리",
+        "csv python": "파이썬",
+        "data cleaning": "데이터 정리",
+        "web scraping simple": "크롤링",
     }
     
     kr_keyword = keyword_map.get(keyword, keyword)
     url = f"https://kmong.com/search?type=gig&keyword={quote(kr_keyword)}"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept-Language': 'ko-KR,ko;q=0.9'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'ko-KR,ko;q=0.9'}
     
     jobs = []
     try:
         r = requests.get(url, headers=headers, timeout=30)
         if r.status_code == 200:
-            # 간단한 정규식 파싱 (의뢰 게시판)
-            # 크몽은 SPA라서 제한적이지만 기본 정보는 추출 가능
-            
-            # title 패턴
             titles = re.findall(r'"title":"([^"]+)"', r.text)
             links = re.findall(r'"url":"(/gig/[^"]+)"', r.text)
             prices = re.findall(r'"price":(\d+)', r.text)
             
-            for i, (title, link) in enumerate(zip(titles[:10], links[:10])):
+            for i, (title, link) in enumerate(zip(titles[:8], links[:8])):
                 price = prices[i] if i < len(prices) else 0
                 
                 jobs.append({
                     'platform': '크몽',
                     'title': title,
                     'link': f"https://kmong.com{link}",
-                    'description': title,  # 크몽은 제목이 설명 역할
-                    'budget': f"₩{int(price):,}" if price else "가격문의",
-                    'keyword': kr_keyword
+                    'description': title,
+                    'budget': f"₩{int(price):,}" if price else "가격문의"
                 })
     except Exception as e:
         print(f"  ❌ 크몽 오류: {e}")
@@ -542,15 +388,9 @@ def fetch_kmong(keyword):
 
 # ============ 알림 포맷 ============
 
-def format_easy_job_alert(job):
-    """초보자 친화적 상세 알림 생성"""
+def format_smart_alert(job, analysis):
+    """분석 결과 기반 상세 알림"""
     
-    template = match_template(job['title'], job['description'])
-    
-    if not template:
-        return None
-    
-    # 플랫폼 이모지
     platform_emoji = {
         'Upwork': '🟢', 
         'Freelancer': '🔵',
@@ -559,41 +399,48 @@ def format_easy_job_alert(job):
         '크몽': '🟤'
     }.get(job['platform'], '⚪')
     
-    # 난이도 표시
-    diff = template.get('difficulty', 3)
-    diff_emoji = "🟢" if diff == 1 else "🟡" if diff == 2 else "🟠"
-    diff_text = "매우 쉬움" if diff == 1 else "쉬움" if diff == 2 else "보통"
+    diff = analysis.get('difficulty', 3)
+    diff_bar = "🟢" * diff + "⚪" * (5 - diff)
+    diff_text = ["", "매우 쉬움", "쉬움", "보통", "어려움", "매우 어려움"][min(diff, 5)]
+    
+    confidence = int(analysis.get('confidence', 0) * 100)
+    
+    requirements = analysis.get('requirements', [])
+    req_text = "\n".join([f"  • {r}" for r in requirements[:5]])
     
     message = f"""
-{platform_emoji} <b>새 작업 발견!</b> | {job['platform']}
+{platform_emoji} <b>✅ 쉬운 작업 발견!</b> | {job['platform']}
 
-{'━'*25}
-📌 <b>{template['name']}</b>
-{diff_emoji} 난이도: {diff_text} | ⏱️ {template['time']}
-💰 예상 수익: <b>{template['price_range']}</b>
-{'━'*25}
+{'━'*28}
+📌 <b>{analysis.get('summary_ko', job['title'][:50])}</b>
+{'━'*28}
 
-📋 <b>원문 제목:</b>
+🎯 <b>카테고리:</b> {analysis.get('category', '기타')}
+{diff_bar} 난이도: {diff_text}
+🎲 <b>확신도:</b> {confidence}%
+
+⏱️ <b>예상 시간:</b> {analysis.get('estimated_time', '미정')}
+💰 <b>예상 수익:</b> {analysis.get('estimated_price', job['budget'])}
+
+{'━'*28}
+📋 <b>요구사항:</b>
+{req_text}
+
+{'━'*28}
+📦 <b>결과물:</b> {analysis.get('solution_description', '코드/문서')}
+
+{'━'*28}
+💻 <b>Claude에게 이렇게 시켜:</b>
+<code>{analysis.get('claude_prompt', '...')[:500]}</code>
+
+{'━'*28}
+📤 <b>전달 방법:</b>
+{analysis.get('delivery_guide', '파일 전달')}
+
+{'━'*28}
+📝 <b>원문 제목:</b>
 {job['title'][:80]}
 
-💵 <b>공고 예산:</b> {job['budget']}
-
-{'━'*25}
-🎯 <b>클라이언트가 원하는 것:</b>
-{template['what_client_wants']}
-
-{'━'*25}
-💻 <b>Claude에게 이렇게 시켜:</b>
-<code>{template['prompt'][:300]}...</code>
-
-{'━'*25}
-📦 <b>결과물 형태:</b>
-{template['output_type']}
-
-📤 <b>전달 방법:</b>
-{template['delivery_msg']}
-
-{'━'*25}
 🔗 <a href="{job['link']}">지원하러 가기</a>
 """
     
@@ -603,146 +450,136 @@ def format_easy_job_alert(job):
 
 def main():
     print(f"\n{'='*50}")
-    print(f"🎯 초보자용 일자리 검색 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"🧠 스마트 일자리 헌터 v6 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*50}")
+    
+    if not ANTHROPIC_API_KEY:
+        print("❌ ANTHROPIC_API_KEY 환경변수 필요!")
+        send_telegram("❌ ANTHROPIC_API_KEY가 설정되지 않았습니다.")
+        return
     
     seen = load_seen_jobs()
-    easy_jobs = []
+    all_jobs = []
     
-    # Upwork 검색
-    print("\n🟢 Upwork 검색 중...")
-    for kw in EASY_KEYWORDS:
+    # ===== 1단계: 공고 수집 =====
+    print("\n📥 1단계: 공고 수집")
+    
+    print("\n🟢 Upwork...")
+    for kw in SEARCH_KEYWORDS[:6]:
         jobs = fetch_upwork(kw)
+        all_jobs.extend(jobs)
         print(f"   {kw}: {len(jobs)}개")
-        
-        for job in jobs:
-            jid = job_id(job['title'], job['link'])
-            if jid not in seen:
-                if is_easy_job(job['title'], job['description']):
-                    template = match_template(job['title'], job['description'])
-                    if template:
-                        job['template'] = template
-                        easy_jobs.append(job)
-                seen.append(jid)
-        
-        time.sleep(1)
+        time.sleep(0.5)
     
-    # Freelancer 검색
-    print("\n🔵 Freelancer 검색 중...")
-    for kw in EASY_KEYWORDS[:5]:  # API 제한
+    print("\n🔵 Freelancer...")
+    for kw in SEARCH_KEYWORDS[:4]:
         jobs = fetch_freelancer(kw)
+        all_jobs.extend(jobs)
         print(f"   {kw}: {len(jobs)}개")
-        
-        for job in jobs:
-            jid = job_id(job['title'], job['link'])
-            if jid not in seen:
-                if is_easy_job(job['title'], job['description']):
-                    template = match_template(job['title'], job['description'])
-                    if template:
-                        job['template'] = template
-                        easy_jobs.append(job)
-                seen.append(jid)
-        
-        time.sleep(1)
+        time.sleep(0.5)
     
-    # PeoplePerHour 검색
-    print("\n🟣 PeoplePerHour 검색 중...")
-    for kw in EASY_KEYWORDS[:5]:
+    print("\n🟣 PeoplePerHour...")
+    for kw in SEARCH_KEYWORDS[:4]:
         jobs = fetch_peopleperhour(kw)
+        all_jobs.extend(jobs)
         print(f"   {kw}: {len(jobs)}개")
-        
-        for job in jobs:
-            jid = job_id(job['title'], job['link'])
-            if jid not in seen:
-                if is_easy_job(job['title'], job['description']):
-                    template = match_template(job['title'], job['description'])
-                    if template:
-                        job['template'] = template
-                        easy_jobs.append(job)
-                seen.append(jid)
-        
-        time.sleep(1)
+        time.sleep(0.5)
     
-    # RemoteOK 검색
-    print("\n🟠 RemoteOK 검색 중...")
-    for kw in EASY_KEYWORDS[:3]:  # API 호출 최소화
+    print("\n🟠 RemoteOK...")
+    for kw in SEARCH_KEYWORDS[:3]:
         jobs = fetch_remoteok(kw)
+        all_jobs.extend(jobs)
         print(f"   {kw}: {len(jobs)}개")
-        
-        for job in jobs:
-            jid = job_id(job['title'], job['link'])
-            if jid not in seen:
-                if is_easy_job(job['title'], job['description']):
-                    template = match_template(job['title'], job['description'])
-                    if template:
-                        job['template'] = template
-                        easy_jobs.append(job)
-                seen.append(jid)
-        
-        time.sleep(1)
+        time.sleep(0.5)
     
-    # 크몽 검색
-    print("\n🟤 크몽 검색 중...")
-    for kw in EASY_KEYWORDS[:5]:
+    print("\n🟤 크몽...")
+    for kw in SEARCH_KEYWORDS[:4]:
         jobs = fetch_kmong(kw)
+        all_jobs.extend(jobs)
         print(f"   {kw}: {len(jobs)}개")
-        
-        for job in jobs:
-            jid = job_id(job['title'], job['link'])
-            if jid not in seen:
-                if is_easy_job(job['title'], job['description']):
-                    template = match_template(job['title'], job['description'])
-                    if template:
-                        job['template'] = template
-                        easy_jobs.append(job)
-                seen.append(jid)
-        
-        time.sleep(1)
+        time.sleep(0.5)
     
+    print(f"\n   총 수집: {len(all_jobs)}개")
+    
+    # 중복 제거 및 새 공고 필터링
+    new_jobs = []
+    for job in all_jobs:
+        jid = job_id(job['title'], job['link'])
+        if jid not in seen:
+            new_jobs.append(job)
+            seen.append(jid)
+    
+    print(f"   새 공고: {len(new_jobs)}개")
     save_seen_jobs(seen)
     
-    # 난이도순 정렬 (쉬운 것 먼저)
-    easy_jobs.sort(key=lambda x: x.get('template', {}).get('difficulty', 5))
+    if not new_jobs:
+        print("\n✅ 새 공고 없음")
+        send_telegram(f"""
+📊 <b>검색 완료</b> - {datetime.now().strftime('%H:%M')}
+
+새로운 공고가 없습니다.
+
+⏰ 다음 검색: 4시간 후
+""")
+        return
     
-    # 알림 전송
+    # ===== 2단계: Claude 분석 =====
+    print(f"\n🧠 2단계: Claude 분석 (최대 15개)")
+    
+    easy_jobs = []
+    analyzed = 0
+    
+    for job in new_jobs[:15]:  # API 비용 절약
+        print(f"\n   분석 중: {job['title'][:40]}...")
+        
+        analysis = analyze_job_with_claude(job)
+        analyzed += 1
+        
+        if analysis and analysis.get('is_easy') and analysis.get('confidence', 0) >= 0.7:
+            print(f"   ✅ 쉬운 작업! (확신도: {analysis.get('confidence', 0)*100:.0f}%)")
+            easy_jobs.append({'job': job, 'analysis': analysis})
+        else:
+            reason = analysis.get('reason', '기준 미달') if analysis else '분석 실패'
+            print(f"   ❌ 제외: {reason[:30]}")
+        
+        time.sleep(1)  # API rate limit
+    
+    # ===== 3단계: 알림 전송 =====
+    print(f"\n📤 3단계: 알림 전송")
+    
     sent = 0
-    for job in easy_jobs[:5]:  # 최대 5개
-        msg = format_easy_job_alert(job)
-        if msg and send_telegram(msg):
-            print(f"   ✅ {job['title'][:40]}...")
+    for item in easy_jobs[:5]:  # 최대 5개
+        msg = format_smart_alert(item['job'], item['analysis'])
+        if send_telegram(msg):
+            print(f"   ✅ 전송: {item['job']['title'][:30]}...")
             sent += 1
-            time.sleep(2)  # 텔레그램 rate limit
-    
-    print(f"\n{'='*50}")
-    print(f"✅ 완료! 쉬운 공고 {len(easy_jobs)}개 발견, {sent}개 알림")
-    print(f"{'='*50}")
+            time.sleep(2)
     
     # 요약 알림
-    if sent > 0:
-        summary = f"""
-📊 <b>검색 완료!</b>
+    summary = f"""
+📊 <b>검색 완료!</b> - {datetime.now().strftime('%H:%M')}
 
-🆕 쉬운 공고 발견: {len(easy_jobs)}개
-📤 알림 전송: {sent}개
+📥 수집: {len(all_jobs)}개
+🆕 새 공고: {len(new_jobs)}개
+🧠 분석: {analyzed}개
+✅ 쉬운 작업: {len(easy_jobs)}개
+📤 알림: {sent}개
 
+{'━'*20}
 💡 <b>작업 순서:</b>
 1. 공고 확인
-2. Claude에게 프롬프트 복붙
+2. Claude 프롬프트 복붙
 3. 결과물 받기
 4. 클라이언트에게 전달
 5. 💰 돈 받기!
 
 ⏰ 다음 검색: 4시간 후
 """
-        send_telegram(summary)
-    elif len(easy_jobs) == 0:
-        send_telegram(f"""
-📊 <b>검색 완료</b>
-
-이번엔 새로운 쉬운 공고가 없어요.
-
-⏰ 다음 검색: 4시간 후
-""")
+    send_telegram(summary)
+    
+    print(f"\n{'='*50}")
+    print(f"✅ 완료! 쉬운 작업 {len(easy_jobs)}개 발견, {sent}개 알림")
+    print(f"{'='*50}")
 
 if __name__ == "__main__":
     main()
