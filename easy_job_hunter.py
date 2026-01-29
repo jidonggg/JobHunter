@@ -416,6 +416,130 @@ def fetch_freelancer(keyword):
     
     return jobs
 
+def fetch_peopleperhour(keyword):
+    """PeoplePerHour RSS에서 공고 수집"""
+    url = f"https://www.peopleperhour.com/freelance-jobs/rss?q={quote(keyword)}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    jobs = []
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        if r.status_code == 200:
+            root = ET.fromstring(r.content)
+            for item in root.findall('.//item')[:10]:
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                desc_elem = item.find('description')
+                
+                if title_elem is not None and link_elem is not None:
+                    title = title_elem.text or ""
+                    link = link_elem.text or ""
+                    desc = desc_elem.text if desc_elem is not None else ""
+                    desc = re.sub(r'<[^>]+>', '', desc)
+                    
+                    jobs.append({
+                        'platform': 'PeoplePerHour',
+                        'title': title,
+                        'link': link,
+                        'description': desc[:500],
+                        'budget': extract_budget(desc),
+                        'keyword': keyword
+                    })
+    except Exception as e:
+        print(f"  ❌ PeoplePerHour 오류: {e}")
+    
+    return jobs
+
+def fetch_remoteok(keyword):
+    """RemoteOK API에서 공고 수집"""
+    url = "https://remoteok.com/api"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    jobs = []
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        if r.status_code == 200:
+            data = r.json()
+            keyword_lower = keyword.lower()
+            
+            for job in data[1:20]:  # 첫번째는 메타데이터
+                title = job.get('position', '')
+                desc = job.get('description', '')
+                tags = ' '.join(job.get('tags', []))
+                
+                # 키워드 매칭
+                if keyword_lower in title.lower() or keyword_lower in desc.lower() or keyword_lower in tags.lower():
+                    salary = job.get('salary_min', '')
+                    if salary:
+                        budget = f"${salary}+"
+                    else:
+                        budget = "미정"
+                    
+                    jobs.append({
+                        'platform': 'RemoteOK',
+                        'title': title,
+                        'link': job.get('url', ''),
+                        'description': re.sub(r'<[^>]+>', '', desc)[:500],
+                        'budget': budget,
+                        'keyword': keyword
+                    })
+    except Exception as e:
+        print(f"  ❌ RemoteOK 오류: {e}")
+    
+    return jobs[:10]
+
+def fetch_kmong(keyword):
+    """크몽에서 공고 수집 (웹 스크래핑)"""
+    
+    # 키워드 한글 변환
+    keyword_map = {
+        "n8n workflow": "n8n",
+        "zapier automation": "자동화",
+        "manychat": "챗봇",
+        "simple chatbot": "챗봇",
+        "csv script": "엑셀 자동화",
+        "google sheets automation": "구글시트",
+        "slack notification": "슬랙",
+        "email automation simple": "이메일 자동화",
+        "chatgpt prompt": "ChatGPT",
+        "data cleaning script": "데이터 정리",
+    }
+    
+    kr_keyword = keyword_map.get(keyword, keyword)
+    url = f"https://kmong.com/search?type=gig&keyword={quote(kr_keyword)}"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept-Language': 'ko-KR,ko;q=0.9'
+    }
+    
+    jobs = []
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        if r.status_code == 200:
+            # 간단한 정규식 파싱 (의뢰 게시판)
+            # 크몽은 SPA라서 제한적이지만 기본 정보는 추출 가능
+            
+            # title 패턴
+            titles = re.findall(r'"title":"([^"]+)"', r.text)
+            links = re.findall(r'"url":"(/gig/[^"]+)"', r.text)
+            prices = re.findall(r'"price":(\d+)', r.text)
+            
+            for i, (title, link) in enumerate(zip(titles[:10], links[:10])):
+                price = prices[i] if i < len(prices) else 0
+                
+                jobs.append({
+                    'platform': '크몽',
+                    'title': title,
+                    'link': f"https://kmong.com{link}",
+                    'description': title,  # 크몽은 제목이 설명 역할
+                    'budget': f"₩{int(price):,}" if price else "가격문의",
+                    'keyword': kr_keyword
+                })
+    except Exception as e:
+        print(f"  ❌ 크몽 오류: {e}")
+    
+    return jobs
+
 # ============ 알림 포맷 ============
 
 def format_easy_job_alert(job):
@@ -427,7 +551,13 @@ def format_easy_job_alert(job):
         return None
     
     # 플랫폼 이모지
-    platform_emoji = {'Upwork': '🟢', 'Freelancer': '🔵'}.get(job['platform'], '⚪')
+    platform_emoji = {
+        'Upwork': '🟢', 
+        'Freelancer': '🔵',
+        'PeoplePerHour': '🟣',
+        'RemoteOK': '🟠',
+        '크몽': '🟤'
+    }.get(job['platform'], '⚪')
     
     # 난이도 표시
     diff = template.get('difficulty', 3)
@@ -501,6 +631,60 @@ def main():
     print("\n🔵 Freelancer 검색 중...")
     for kw in EASY_KEYWORDS[:5]:  # API 제한
         jobs = fetch_freelancer(kw)
+        print(f"   {kw}: {len(jobs)}개")
+        
+        for job in jobs:
+            jid = job_id(job['title'], job['link'])
+            if jid not in seen:
+                if is_easy_job(job['title'], job['description']):
+                    template = match_template(job['title'], job['description'])
+                    if template:
+                        job['template'] = template
+                        easy_jobs.append(job)
+                seen.append(jid)
+        
+        time.sleep(1)
+    
+    # PeoplePerHour 검색
+    print("\n🟣 PeoplePerHour 검색 중...")
+    for kw in EASY_KEYWORDS[:5]:
+        jobs = fetch_peopleperhour(kw)
+        print(f"   {kw}: {len(jobs)}개")
+        
+        for job in jobs:
+            jid = job_id(job['title'], job['link'])
+            if jid not in seen:
+                if is_easy_job(job['title'], job['description']):
+                    template = match_template(job['title'], job['description'])
+                    if template:
+                        job['template'] = template
+                        easy_jobs.append(job)
+                seen.append(jid)
+        
+        time.sleep(1)
+    
+    # RemoteOK 검색
+    print("\n🟠 RemoteOK 검색 중...")
+    for kw in EASY_KEYWORDS[:3]:  # API 호출 최소화
+        jobs = fetch_remoteok(kw)
+        print(f"   {kw}: {len(jobs)}개")
+        
+        for job in jobs:
+            jid = job_id(job['title'], job['link'])
+            if jid not in seen:
+                if is_easy_job(job['title'], job['description']):
+                    template = match_template(job['title'], job['description'])
+                    if template:
+                        job['template'] = template
+                        easy_jobs.append(job)
+                seen.append(jid)
+        
+        time.sleep(1)
+    
+    # 크몽 검색
+    print("\n🟤 크몽 검색 중...")
+    for kw in EASY_KEYWORDS[:5]:
+        jobs = fetch_kmong(kw)
         print(f"   {kw}: {len(jobs)}개")
         
         for job in jobs:
